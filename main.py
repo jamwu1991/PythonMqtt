@@ -7,13 +7,26 @@ import ssl
 MqttClient = None
 SocketServer = None
 SubscribeClientCSharp = None;
+ConnectClientCSharp = None
+ConnectOperation = None
 PythonSocketPort = 55688
 
 # The callback run when a message is pushed by the topic from the broker.
 def on_message(client, userdata, msg):
     global SocketServer, SubscribeClientCSharp
-    passing_message = "[Subscribe] topic = " + msg.topic + ", payload = " + str(msg.payload.decode())
+    passing_message = "[SUBSCRIBE_RECEIVED_MESSAGE] topic = " + msg.topic + ", payload = " + str(msg.payload.decode())
     SocketServer.send_message(SubscribeClientCSharp, passing_message)
+
+def on_connect(client, userdata, flags, rc):
+    returnCodeString = None
+    if rc==0:
+        returnCodeString = "Connected success & Returned code="
+    else:
+        returnCodeString = "Connected fail & Returned code="
+
+    connectString = f"[{ConnectOperation.upper()}] {returnCodeString}{rc}"
+    SocketServer.send_message(ConnectClientCSharp, connectString)
+
 
 def PahoMqttConnect(obj, clientFromCsharp, server):
     clientId = obj["clientId"]
@@ -25,6 +38,7 @@ def PahoMqttConnect(obj, clientFromCsharp, server):
     tls_CLIENTKEY_PATH = obj["ClientKeyPath"]
 
     mqttClient = paho.Client(clientId)
+    mqttClient.on_connect = on_connect
     if tls_CERT_PATH != None:
         mqttClient.tls_set(ca_certs=tls_CERT_PATH, certfile=tls_CLIENT_PATH,
                        keyfile=tls_CLIENTKEY_PATH, cert_reqs=ssl.CERT_REQUIRED,
@@ -47,7 +61,7 @@ def CsharpClientConnect(client, server):
     server.send_message(client, passing_message)
 
 def MessageReceived(client, server, message):
-    global SocketServer, MqttClient, SubscribeClientCSharp
+    global SocketServer, MqttClient, SubscribeClientCSharp, ConnectClientCSharp, ConnectOperation
 
     if SocketServer == None:
         SocketServer = server
@@ -58,7 +72,10 @@ def MessageReceived(client, server, message):
     payload = obj["payload"]
 
     if MqttClient == None:
+        ConnectClientCSharp = client
+        ConnectOperation = operation
         MqttClient = PahoMqttConnect(obj, client, server)
+
         if MqttClient == None:
             return
 
@@ -76,7 +93,6 @@ def MessageReceived(client, server, message):
             MqttClient.subscribe(topic)
             passing_message = f"[{operation.upper()}] topic = {topic}"
             SocketServer.send_message(client, passing_message)
-
         MqttClient.loop_forever()
 
 socketServer = WebsocketServer(PythonSocketPort, host='localhost', loglevel=logging.INFO)
