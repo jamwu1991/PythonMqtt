@@ -3,6 +3,7 @@ import json
 import logging
 import paho.mqtt.client as paho
 import ssl
+import requests
 
 MqttClient = None
 SocketServer = None
@@ -63,37 +64,61 @@ def CsharpClientConnect(client, server):
 def MessageReceived(client, server, message):
     global SocketServer, MqttClient, SubscribeClientCSharp, ConnectClientCSharp, ConnectOperation
 
+
+
     if SocketServer == None:
         SocketServer = server
 
     obj = json.loads(message)
     operation = obj["function"]
-    topics = obj["topics"]
-    payload = obj["payload"]
+    if operation.lower() == "upload":
+        print("gogo upload")
+        logPath = obj["logPath"]
+        url = obj["uploadUrl"]
+        headers = obj["headers"]
+        verb = obj["verb"]
 
-    if MqttClient == None:
-        ConnectClientCSharp = client
-        ConnectOperation = operation
-        MqttClient = PahoMqttConnect(obj, client, server)
+        headers = headers.lstrip('[').rstrip(']').split(",\"")
+        headerDict = {}
+        for value in headers:
+            value = value.lstrip('\"').rstrip('\"')
+            valuelist = value.split(':', 1)
+            headerDict[valuelist[0]] = valuelist[1]
+
+        if verb.lower() == "post":
+            r = requests.post(url=url,data=open(logPath, "rb"),headers=headerDict)
+            print("post = ",r.status_code)
+        elif verb.lower() == "put":
+            r = requests.put(url=url, data=open(logPath, "rb"), headers=headerDict)
+            print("put = ", r.status_code)
+
+    elif operation.lower() == "publish" or operation.lower() == "subscribe":
+        topics = obj["topics"]
+        payload = obj["payload"]
 
         if MqttClient == None:
-            return
+            ConnectClientCSharp = client
+            ConnectOperation = operation
+            MqttClient = PahoMqttConnect(obj, client, server)
 
-    if operation.lower() == "publish":
-        for topic in topics:
-            MqttClient.publish(topic, payload)
-            passing_message = f"[{operation.upper()}] topic = {topic}, payload = {payload}"
-            SocketServer.send_message(client, passing_message)
+            if MqttClient == None:
+                return
 
-    elif operation.lower() == "subscribe":
-        SubscribeClientCSharp = client
-        MqttClient.on_message = on_message
+        if operation.lower() == "publish":
+            for topic in topics:
+                MqttClient.publish(topic, payload)
+                passing_message = f"[{operation.upper()}] topic = {topic}, payload = {payload}"
+                SocketServer.send_message(client, passing_message)
 
-        for topic in topics:
-            MqttClient.subscribe(topic)
-            passing_message = f"[{operation.upper()}] topic = {topic}"
-            SocketServer.send_message(client, passing_message)
-        MqttClient.loop_forever()
+        elif operation.lower() == "subscribe":
+            SubscribeClientCSharp = client
+            MqttClient.on_message = on_message
+
+            for topic in topics:
+                MqttClient.subscribe(topic)
+                passing_message = f"[{operation.upper()}] topic = {topic}"
+                SocketServer.send_message(client, passing_message)
+            MqttClient.loop_forever()
 
 socketServer = WebsocketServer(PythonSocketPort, host='localhost', loglevel=logging.INFO)
 socketServer.set_fn_new_client(CsharpClientConnect)
